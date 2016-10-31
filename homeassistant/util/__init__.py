@@ -4,6 +4,7 @@ from itertools import chain
 import threading
 import queue
 from datetime import datetime
+import logging
 import re
 import enum
 import socket
@@ -315,58 +316,38 @@ class ThreadPool(object):
         busy_callback: method to be called when queue gets too big.
                        Parameters: worker_count, list of current_jobs,
                                    pending_jobs_count
+
+        Not thread safe.
         """
         self._job_handler = job_handler
 
-        self.worker_count = 0
+        self.worker_count = worker_count
+        self.active_workers = 0
         self._work_queue = queue.Queue()
         self.current_jobs = []
         self._quit_task = object()
+        self._logger = logging.getLogger('ThreadPool')
 
         self.running = True
 
-        for _ in range(worker_count):
-            self.add_worker()
+        self._start_worker()
 
     @property
     def queue_size(self):
         """Return estimated number of jobs that are waiting to be processed."""
         return self._work_queue.qsize()
 
-    def add_worker(self):
-        """Add worker to the thread pool and reset warning limit."""
-        if not self.running:
-            raise RuntimeError("ThreadPool not running")
-
-        threading.Thread(
-            target=self._worker, daemon=True,
-            name='ThreadPool Worker {}'.format(self.worker_count)).start()
-
-        self.worker_count += 1
-
-    def remove_worker(self):
-        """Remove worker from the thread pool and reset warning limit."""
-        if not self.running:
-            raise RuntimeError("ThreadPool not running")
-
-        self._work_queue.put(self._quit_task)
-
-        self.worker_count -= 1
-
     def add_job(self, job):
         """Add a job to the queue."""
         if not self.running:
             raise RuntimeError("ThreadPool not running")
 
+        if (self.active_workers == 0 or
+                (len(self.current_jobs) == self.active_workers and
+                 self.active_workers < self.worker_count)):
+            self._start_worker()
+
         self._work_queue.put(job)
-
-    def add_many_jobs(self, jobs):
-        """Add a list of jobs to the queue."""
-        if not self.running:
-            raise RuntimeError("ThreadPool not running")
-
-        for job in jobs:
-            self._work_queue.put(job)
 
     def block_till_done(self):
         """Block till current work is done."""
@@ -380,13 +361,22 @@ class ThreadPool(object):
             return
 
         # Tell the workers to quit
-        for _ in range(self.worker_count):
-            self.remove_worker()
+        while self.active_workers:
+            self._work_queue.put(self._quit_task)
+            self.active_workers -= 1
 
         self.running = False
 
         # Wait till all workers have quit
         self.block_till_done()
+
+    def _start_worker(self):
+        """Start a new worker."""
+        self.active_workers += 1
+        self._logger.debug('Starting worker %s', self.active_workers)
+        threading.Thread(
+            target=self._worker, daemon=True,
+            name='ThreadPool Worker {}'.format(self.worker_count)).start()
 
     def _worker(self):
         """Handle jobs for the thread pool."""

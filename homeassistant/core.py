@@ -53,10 +53,7 @@ TIMER_INTERVAL = 1  # seconds
 # How long we wait for the result of a service call
 SERVICE_CALL_LIMIT = 10  # seconds
 
-# Define number of MINIMUM worker threads.
-# During bootstrap of HA (see bootstrap._setup_component()) worker threads
-# will be added for each component that polls devices.
-MIN_WORKER_THREAD = 2
+POOL_WORKER_THREAD = 10
 
 # Pattern for validating entity IDs (format: <domain>.<entity>)
 ENTITY_ID_PATTERN = re.compile(r"^(\w+)\.(\w+)$")
@@ -111,6 +108,7 @@ class HomeAssistant(object):
         self.executor = ThreadPoolExecutor(max_workers=5)
         self.loop.set_default_executor(self.executor)
         self.loop.set_exception_handler(self._async_exception_handler)
+        # All our interactions with the pool are from within async.
         self.pool = None
         self.bus = EventBus(self)
         self.services = ServiceRegistry(self.bus, self.async_add_job,
@@ -197,7 +195,8 @@ class HomeAssistant(object):
         target: target to call.
         args: parameters for method to call.
         """
-        self.pool.add_job((target,) + args)
+        run_callback_threadsafe(
+            self.loop, self._async_add_thread_job, target, *args).result()
 
     @callback
     def async_add_job(self, target: Callable[..., None], *args: Any) -> None:
@@ -213,9 +212,7 @@ class HomeAssistant(object):
         elif asyncio.iscoroutinefunction(target):
             self.loop.create_task(target(*args))
         else:
-            if self.pool is None:
-                self.async_init_pool()
-            self.add_job(target, *args)
+            self._async_add_thread_job(target, *args)
 
     @callback
     def async_run_job(self, target: Callable[..., None], *args: Any) -> None:
@@ -334,6 +331,14 @@ class HomeAssistant(object):
         """Restart Home Assistant."""
         self.exit_code = RESTART_EXIT_CODE
         self.async_add_job(self.async_stop)
+
+    @callback
+    def _async_add_thread_job(self, target: Callable[..., None],
+                              *args: Any) -> None:
+        """Add a thread job."""
+        if self.pool is None:
+            self.async_init_pool()
+        self.pool.add_job((target,) + args)
 
 
 class EventOrigin(enum.Enum):
@@ -1195,7 +1200,7 @@ def _async_create_timer(hass, interval=TIMER_INTERVAL):
 def create_worker_pool(worker_count=None):
     """Create a worker pool."""
     if worker_count is None:
-        worker_count = MIN_WORKER_THREAD
+        worker_count = POOL_WORKER_THREAD
 
     def job_handler(job):
         """Called whenever a job is available to do."""

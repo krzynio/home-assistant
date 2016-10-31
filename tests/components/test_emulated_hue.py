@@ -15,10 +15,11 @@ from homeassistant.util.async import run_coroutine_threadsafe
 
 from tests.common import get_test_instance_port, get_test_home_assistant
 
-HTTP_SERVER_PORT = get_test_instance_port()
 BRIDGE_SERVER_PORT = get_test_instance_port()
+BRIDGE2_SERVER_PORT = get_test_instance_port()
 
 BRIDGE_URL_BASE = "http://127.0.0.1:{}".format(BRIDGE_SERVER_PORT) + "{}"
+BRIDGE2_URL_BASE = "http://127.0.0.1:{}".format(BRIDGE2_SERVER_PORT) + "{}"
 JSON_HEADERS = {const.HTTP_HEADER_CONTENT_TYPE: const.CONTENT_TYPE_JSON}
 
 
@@ -33,7 +34,7 @@ def setup_hass_instance(emulated_hue_config):
 
     bootstrap.setup_component(
         hass, http.DOMAIN,
-        {http.DOMAIN: {http.CONF_SERVER_PORT: HTTP_SERVER_PORT}})
+        {http.DOMAIN: {http.CONF_SERVER_PORT: get_test_instance_port()}})
 
     bootstrap.setup_component(hass, emulated_hue.DOMAIN, emulated_hue_config)
 
@@ -118,7 +119,7 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
         """Setup the class."""
         cls.hass = setup_hass_instance({
             emulated_hue.DOMAIN: {
-                emulated_hue.CONF_LISTEN_PORT: BRIDGE_SERVER_PORT,
+                emulated_hue.CONF_LISTEN_PORT: BRIDGE2_SERVER_PORT,
                 emulated_hue.CONF_EXPOSE_BY_DEFAULT: True
             }
         })
@@ -149,7 +150,7 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
     def test_discover_lights(self):
         """Test the discovery of lights."""
         result = requests.get(
-            BRIDGE_URL_BASE.format('/api/username/lights'), timeout=5)
+            BRIDGE2_URL_BASE.format('/api/username/lights'), timeout=5)
 
         self.assertEqual(result.status_code, 200)
         self.assertTrue('application/json' in result.headers['content-type'])
@@ -193,7 +194,7 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
         # Make sure kitchen light isn't accessible
         kitchen_url = '/api/username/lights/{}'.format('light.kitchen_lights')
         kitchen_result = requests.get(
-            BRIDGE_URL_BASE.format(kitchen_url), timeout=5)
+            BRIDGE2_URL_BASE.format(kitchen_url), timeout=5)
 
         self.assertEqual(kitchen_result.status_code, 404)
 
@@ -242,7 +243,7 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
         # Make sure we fail gracefully when we can't parse the data
         data = {'key1': 'value1', 'key2': 'value2'}
         result = requests.put(
-            BRIDGE_URL_BASE.format(
+            BRIDGE2_URL_BASE.format(
                 '/api/username/lights/{}/state'.format(
                     "light.ceiling_lights")), data=data)
 
@@ -251,14 +252,14 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
     def test_entity_not_found(self):
         """Test for entity which are not found."""
         result = requests.get(
-            BRIDGE_URL_BASE.format(
+            BRIDGE2_URL_BASE.format(
                 '/api/username/lights/{}'.format("not.existant_entity")),
             timeout=5)
 
         self.assertEqual(result.status_code, 404)
 
         result = requests.put(
-            BRIDGE_URL_BASE.format(
+            BRIDGE2_URL_BASE.format(
                 '/api/username/lights/{}/state'.format("non.existant_entity")),
             timeout=5)
 
@@ -267,21 +268,21 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
     def test_allowed_methods(self):
         """Test the allowed methods."""
         result = requests.get(
-            BRIDGE_URL_BASE.format(
+            BRIDGE2_URL_BASE.format(
                 '/api/username/lights/{}/state'.format(
                     "light.ceiling_lights")))
 
         self.assertEqual(result.status_code, 405)
 
         result = requests.put(
-            BRIDGE_URL_BASE.format(
+            BRIDGE2_URL_BASE.format(
                 '/api/username/lights/{}'.format("light.ceiling_lights")),
             data={'key1': 'value1'})
 
         self.assertEqual(result.status_code, 405)
 
         result = requests.put(
-            BRIDGE_URL_BASE.format('/api/username/lights'),
+            BRIDGE2_URL_BASE.format('/api/username/lights'),
             data={'key1': 'value1'})
 
         self.assertEqual(result.status_code, 405)
@@ -290,7 +291,7 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
         """Test the request to set the state."""
         # Test proper on value parsing
         result = requests.put(
-            BRIDGE_URL_BASE.format(
+            BRIDGE2_URL_BASE.format(
                 '/api/username/lights/{}/state'.format(
                     "light.ceiling_lights")),
                 data=json.dumps({HUE_API_STATE_ON: 1234}))
@@ -299,7 +300,7 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
 
         # Test proper brightness value parsing
         result = requests.put(
-            BRIDGE_URL_BASE.format(
+            BRIDGE2_URL_BASE.format(
                 '/api/username/lights/{}/state'.format(
                     "light.ceiling_lights")), data=json.dumps({
                         HUE_API_STATE_ON: True,
@@ -340,7 +341,7 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
     def perform_get_light_state(self, entity_id, expected_status):
         """Test the gettting of a light state."""
         result = requests.get(
-            BRIDGE_URL_BASE.format(
+            BRIDGE2_URL_BASE.format(
                 '/api/username/lights/{}'.format(entity_id)), timeout=5)
 
         self.assertEqual(result.status_code, expected_status)
@@ -356,7 +357,7 @@ class TestEmulatedHueExposedByDefault(unittest.TestCase):
     def perform_put_light_state(self, entity_id, is_on, brightness=None,
                                 content_type='application/json'):
         """Test the setting of a light state."""
-        url = BRIDGE_URL_BASE.format(
+        url = BRIDGE2_URL_BASE.format(
             '/api/username/lights/{}/state'.format(entity_id))
 
         req_headers = {'Content-Type': content_type}
